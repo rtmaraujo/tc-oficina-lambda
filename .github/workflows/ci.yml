@@ -12,7 +12,7 @@ permissions:
   checks: write
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: us-west-2
   ARTIFACTS_BUCKET: tc-oficina-sam-artifacts
 
 jobs:
@@ -63,12 +63,14 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Garantir Bucket de Artefatos
         run: |
           if ! aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null; then
-            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region "$AWS_REGION"
+            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region "$AWS_REGION" \
+              --create-bucket-configuration LocationConstraint="$AWS_REGION"
           fi
         env:
           ARTIFACTS_BUCKET: ${{ env.ARTIFACTS_BUCKET }}
@@ -122,12 +124,14 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Garantir Bucket de Artefatos
         run: |
           if ! aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null; then
-            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region "$AWS_REGION"
+            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region "$AWS_REGION" \
+              --create-bucket-configuration LocationConstraint="$AWS_REGION"
           fi
         env:
           ARTIFACTS_BUCKET: ${{ env.ARTIFACTS_BUCKET }}
