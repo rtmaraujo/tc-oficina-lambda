@@ -1,0 +1,158 @@
+name: CI/CD - Lambda
+
+on:
+  push:
+    branches: [main, homologacao]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+env:
+  AWS_REGION: us-east-1
+  ARTIFACTS_BUCKET: tc-oficina-sam-artifacts
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      - name: Build e Testes
+        run: mvn clean verify
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-jar
+          path: target/tc-oficina-lambda.jar
+
+  deploy-homologacao:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/homologacao'
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      - name: Setup SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Garantir Bucket de Artefatos
+        run: |
+          if ! aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null; then
+            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region "$AWS_REGION"
+          fi
+        env:
+          ARTIFACTS_BUCKET: ${{ env.ARTIFACTS_BUCKET }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      - name: Build Fat Jar
+        run: mvn clean package -DskipTests
+
+      - name: Package SAM (homologacao)
+        run: |
+          sam package \
+            --template-file template.yaml \
+            --s3-bucket "${{ env.ARTIFACTS_BUCKET }}" \
+            --output-template-file packaged.yaml
+
+      - name: Deploy SAM (homologacao)
+        run: |
+          sam deploy \
+            --template-file packaged.yaml \
+            --stack-name tc-oficina-lambda-homolog \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              JwtSecret=${{ secrets.JWT_SECRET }} \
+              DbUrl=${{ secrets.DB_URL }} \
+              DbUser=${{ secrets.DB_USER }} \
+              DbPassword=${{ secrets.DB_PASSWORD }}
+
+  deploy-producao:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      - name: Setup SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Garantir Bucket de Artefatos
+        run: |
+          if ! aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null; then
+            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region "$AWS_REGION"
+          fi
+        env:
+          ARTIFACTS_BUCKET: ${{ env.ARTIFACTS_BUCKET }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      - name: Build Fat Jar
+        run: mvn clean package -DskipTests
+
+      - name: Package SAM (producao)
+        run: |
+          sam package \
+            --template-file template.yaml \
+            --s3-bucket "${{ env.ARTIFACTS_BUCKET }}" \
+            --output-template-file packaged.yaml
+
+      - name: Deploy SAM (producao)
+        run: |
+          sam deploy \
+            --template-file packaged.yaml \
+            --stack-name tc-oficina-lambda-prod \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              JwtSecret=${{ secrets.JWT_SECRET }} \
+              DbUrl=${{ secrets.DB_URL }} \
+              DbUser=${{ secrets.DB_USER }} \
+              DbPassword=${{ secrets.DB_PASSWORD }}
