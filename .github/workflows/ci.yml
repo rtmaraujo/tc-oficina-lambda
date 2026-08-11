@@ -68,7 +68,7 @@ jobs:
 
       - name: Coletar Subnets e Security Group da VPC
         run: |
-          echo "VPC_SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=tc-oficina-subnet-private-*" --query 'Subnets[].SubnetId' --output text | tr '\n' ',' | sed 's/,$//')" >> $GITHUB_ENV
+          echo "VPC_SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=tc-oficina-subnet-private-*" --query 'Subnets[].SubnetId' --output text | tr '\t' ',')" >> $GITHUB_ENV
           echo "VPC_SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=tc-oficina-k3s-sg" --query 'SecurityGroups[0].GroupId' --output text)" >> $GITHUB_ENV
           echo "Subnets: $VPC_SUBNET_IDS"
           echo "SG: $VPC_SECURITY_GROUP_ID"
@@ -138,7 +138,7 @@ jobs:
 
       - name: Coletar Subnets e Security Group da VPC
         run: |
-          echo "VPC_SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=tc-oficina-subnet-private-*" --query 'Subnets[].SubnetId' --output text | tr '\n' ',' | sed 's/,$//')" >> $GITHUB_ENV
+          echo "VPC_SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=tc-oficina-subnet-private-*" --query 'Subnets[].SubnetId' --output text | tr '\t' ',')" >> $GITHUB_ENV
           echo "VPC_SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=tc-oficina-k3s-sg" --query 'SecurityGroups[0].GroupId' --output text)" >> $GITHUB_ENV
           echo "Subnets: $VPC_SUBNET_IDS"
           echo "SG: $VPC_SECURITY_GROUP_ID"
