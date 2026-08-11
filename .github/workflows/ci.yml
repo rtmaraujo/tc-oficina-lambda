@@ -66,6 +66,13 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Coletar Subnets e Security Group da VPC
+        run: |
+          echo "VPC_SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=tc-oficina-subnet-private-*" --query 'Subnets[].SubnetId' --output text | tr '\n' ',' | sed 's/,$//')" >> $GITHUB_ENV
+          echo "VPC_SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=tc-oficina-k3s-sg" --query 'SecurityGroups[0].GroupId' --output text)" >> $GITHUB_ENV
+          echo "Subnets: $VPC_SUBNET_IDS"
+          echo "SG: $VPC_SECURITY_GROUP_ID"
+
       - name: Garantir Bucket de Artefatos
         run: |
           if ! aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null; then
@@ -98,7 +105,9 @@ jobs:
               JwtSecret=${{ secrets.JWT_SECRET }} \
               DbUrl=${{ secrets.DB_URL }} \
               DbUser=${{ secrets.DB_USER }} \
-              DbPassword=${{ secrets.DB_PASSWORD }}
+              DbPassword=${{ secrets.DB_PASSWORD }} \
+              VpcSubnetIds=${{ env.VPC_SUBNET_IDS }} \
+              VpcSecurityGroupId=${{ env.VPC_SECURITY_GROUP_ID }}
 
   deploy-producao:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -126,6 +135,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Coletar Subnets e Security Group da VPC
+        run: |
+          echo "VPC_SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=tc-oficina-subnet-private-*" --query 'Subnets[].SubnetId' --output text | tr '\n' ',' | sed 's/,$//')" >> $GITHUB_ENV
+          echo "VPC_SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=tc-oficina-k3s-sg" --query 'SecurityGroups[0].GroupId' --output text)" >> $GITHUB_ENV
+          echo "Subnets: $VPC_SUBNET_IDS"
+          echo "SG: $VPC_SECURITY_GROUP_ID"
 
       - name: Garantir Bucket de Artefatos
         run: |
@@ -159,4 +175,6 @@ jobs:
               JwtSecret=${{ secrets.JWT_SECRET }} \
               DbUrl=${{ secrets.DB_URL }} \
               DbUser=${{ secrets.DB_USER }} \
-              DbPassword=${{ secrets.DB_PASSWORD }}
+              DbPassword=${{ secrets.DB_PASSWORD }} \
+              VpcSubnetIds=${{ env.VPC_SUBNET_IDS }} \
+              VpcSecurityGroupId=${{ env.VPC_SECURITY_GROUP_ID }}

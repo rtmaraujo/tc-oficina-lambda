@@ -9,6 +9,10 @@ Globals:
     Runtime: java21
     Architectures:
       - x86_64
+    VpcConfig:
+      SecurityGroupIds:
+        - !Ref VpcSecurityGroupId
+      SubnetIds: !Ref VpcSubnetIds
     Environment:
       Variables:
         JWT_SECRET: !Ref JwtSecret
@@ -45,3 +49,7 @@ Parameters:
   DbPassword:
     Type: String
     NoEcho: true
+  VpcSubnetIds:
+    Type: CommaDelimitedList
+  VpcSecurityGroupId:
+    Type: String
