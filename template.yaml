@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Function Serverless de autenticacao via CPF para o Tech Challenge Fase 3
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 512
+    Runtime: java21
+    Architectures:
+      - x86_64
+    VpcConfig:
+      SecurityGroupIds:
+        - !Ref VpcSecurityGroupId
+      SubnetIds: !Ref VpcSubnetIds
+    Environment:
+      Variables:
+        JWT_SECRET: !Ref JwtSecret
+        DB_URL: !Ref DbUrl
+        DB_USER: !Ref DbUser
+        DB_PASSWORD: !Ref DbPassword
+
+Resources:
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: target/tc-oficina-lambda.jar
+      Handler: br.com.fiap.lambda.AuthHandler::handleRequest
+      Events:
+        AuthRoute:
+          Type: Api
+          Properties:
+            Path: /auth
+            Method: POST
+
+Outputs:
+  AuthApiUrl:
+    Description: URL da API de autenticacao
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/auth"
+
+Parameters:
+  JwtSecret:
+    Type: String
+    NoEcho: true
+  DbUrl:
+    Type: String
+  DbUser:
+    Type: String
+  DbPassword:
+    Type: String
+    NoEcho: true
+  VpcSubnetIds:
+    Type: CommaDelimitedList
+  VpcSecurityGroupId:
+    Type: String
