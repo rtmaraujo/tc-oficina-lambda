@@ -1,4 +1,4 @@
-name: CI/CD - Lambda
+name: CI/CD - Auth (container no k3s)
 
 on:
   push:
@@ -13,7 +13,6 @@ permissions:
 
 env:
   AWS_REGION: us-west-2
-  ARTIFACTS_BUCKET: tc-oficina-sam-artifacts
 
 jobs:
   build:
@@ -36,145 +35,185 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lambda-jar
+          name: auth-jar
           path: target/tc-oficina-lambda.jar
+
+  docker-build:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login no ECR
+        env:
+          ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+        run: |
+          aws ecr get-login-password --region "${{ env.AWS_REGION }}" \
+            | docker login --username AWS --password-stdin "$ECR_REPOSITORY_URL"
+
+      - name: Build e Push da Imagem Auth
+        env:
+          ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          IMAGE_TAG="auth-${GITHUB_SHA}"
+          docker build \
+            --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --build-arg COMMIT_SHA="${GITHUB_SHA}" \
+            -t "${ECR_REPOSITORY_URL}:${IMAGE_TAG}" .
+          docker push "${ECR_REPOSITORY_URL}:${IMAGE_TAG}"
 
   deploy-homologacao:
     if: github.event_name == 'push' && github.ref == 'refs/heads/homologacao'
-    needs: build
+    needs: docker-build
     runs-on: ubuntu-latest
+    environment: homologacao
+
+    env:
+      NAMESPACE: tc-oficina-homolog
+      NODE_PORT_AUTH: "30083"
+      AUTH_IMAGE: ${{ vars.ECR_REPOSITORY_URL }}:auth-${{ github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-          cache: maven
-
-      - name: Setup SAM CLI
-        uses: aws-actions/setup-sam@v2
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Coletar Subnets e Security Group da VPC
+      - name: Configurar chave SSH do cluster k3s
         run: |
-          echo "VPC_SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=tc-oficina-subnet-private-*" --query 'Subnets[].SubnetId' --output text | tr '\t' ',')" >> $GITHUB_ENV
-          echo "VPC_SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=tc-oficina-k3s-sg" --query 'SecurityGroups[0].GroupId' --output text)" >> $GITHUB_ENV
-          echo "Subnets: $VPC_SUBNET_IDS"
-          echo "SG: $VPC_SECURITY_GROUP_ID"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.K3S_SSH_KEY }}" > ~/.ssh/k3s
+          chmod 600 ~/.ssh/k3s
+          ssh-keyscan -H "${{ vars.K3S_SERVER_IP }}" > /dev/null 2>&1 || true
 
-      - name: Garantir Bucket de Artefatos
-        run: |
-          if ! aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null; then
-            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region "$AWS_REGION" \
-              --create-bucket-configuration LocationConstraint="$AWS_REGION"
-          fi
+      - name: Obter Manifestos (tc-oficina-infra-k8s)
+        uses: actions/checkout@v4
+        with:
+          repository: rtmaraujo/tc-oficina-infra-k8s
+          path: infra-k8s
+
+      - name: Renderizar e Aplicar Manifestos Auth (homologacao)
         env:
-          ARTIFACTS_BUCKET: ${{ env.ARTIFACTS_BUCKET }}
-          AWS_REGION: ${{ env.AWS_REGION }}
-
-      - name: Build Fat Jar
-        run: mvn clean package -DskipTests
-
-      - name: Package SAM (homologacao)
+          NAMESPACE: ${{ env.NAMESPACE }}
+          NODE_PORT_AUTH: ${{ env.NODE_PORT_AUTH }}
+          AUTH_IMAGE: ${{ env.AUTH_IMAGE }}
+          DB_URL: ${{ secrets.DB_URL }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          K3S_HOST: ${{ vars.K3S_SERVER_IP }}
         run: |
-          sam package \
-            --template-file template.yaml \
-            --s3-bucket "${{ env.ARTIFACTS_BUCKET }}" \
-            --output-template-file packaged.yaml
+          sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
+          mkdir -p rendered
+          envsubst < infra-k8s/k8s/namespace.yaml > rendered/namespace.yaml
+          for f in infra-k8s/k8s/auth-*.yaml; do
+            envsubst < "$f" > "rendered/$(basename "$f")"
+          done
+          ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ubuntu@"$K3S_HOST" "sudo k3s kubectl apply -f -" < rendered/namespace.yaml
+          for f in rendered/auth-*.yaml; do
+            ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              ubuntu@"$K3S_HOST" "sudo k3s kubectl apply -f -" < "$f" || exit 1
+          done
 
-      - name: Deploy SAM (homologacao)
+      - name: Aguardar Rollout
         run: |
-          sam deploy \
-            --template-file packaged.yaml \
-            --stack-name tc-oficina-lambda-homolog \
-            --capabilities CAPABILITY_IAM \
-            --no-confirm-changeset \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              JwtSecret=${{ secrets.JWT_SECRET }} \
-              DbUrl=${{ secrets.DB_URL }} \
-              DbUser=${{ secrets.DB_USER }} \
-              DbPassword=${{ secrets.DB_PASSWORD }} \
-              VpcSubnetIds=${{ env.VPC_SUBNET_IDS }} \
-              VpcSecurityGroupId=${{ env.VPC_SECURITY_GROUP_ID }}
+          ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ubuntu@"${{ vars.K3S_SERVER_IP }}" "sudo k3s kubectl rollout status deployment/auth-deployment -n ${{ env.NAMESPACE }} --timeout=300s"
+          ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ubuntu@"${{ vars.K3S_SERVER_IP }}" "sudo k3s kubectl get pods -n ${{ env.NAMESPACE }}"
+
+      - name: Smoke Test (healthcheck auth)
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS "http://${{ vars.K3S_SERVER_IP }}:${{ env.NODE_PORT_AUTH }}/health"; then
+              echo ""
+              echo "Healthcheck OK (auth homologacao)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Healthcheck falhou em auth homologacao"
+          exit 1
 
   deploy-producao:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: docker-build
     runs-on: ubuntu-latest
+    environment: producao
+
+    env:
+      NAMESPACE: tc-oficina
+      NODE_PORT_AUTH: "30082"
+      AUTH_IMAGE: ${{ vars.ECR_REPOSITORY_URL }}:auth-${{ github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-          cache: maven
-
-      - name: Setup SAM CLI
-        uses: aws-actions/setup-sam@v2
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Coletar Subnets e Security Group da VPC
+      - name: Configurar chave SSH do cluster k3s
         run: |
-          echo "VPC_SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=tc-oficina-subnet-private-*" --query 'Subnets[].SubnetId' --output text | tr '\t' ',')" >> $GITHUB_ENV
-          echo "VPC_SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=tc-oficina-k3s-sg" --query 'SecurityGroups[0].GroupId' --output text)" >> $GITHUB_ENV
-          echo "Subnets: $VPC_SUBNET_IDS"
-          echo "SG: $VPC_SECURITY_GROUP_ID"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.K3S_SSH_KEY }}" > ~/.ssh/k3s
+          chmod 600 ~/.ssh/k3s
+          ssh-keyscan -H "${{ vars.K3S_SERVER_IP }}" > /dev/null 2>&1 || true
 
-      - name: Garantir Bucket de Artefatos
-        run: |
-          if ! aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null; then
-            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region "$AWS_REGION" \
-              --create-bucket-configuration LocationConstraint="$AWS_REGION"
-          fi
+      - name: Obter Manifestos (tc-oficina-infra-k8s)
+        uses: actions/checkout@v4
+        with:
+          repository: rtmaraujo/tc-oficina-infra-k8s
+          path: infra-k8s
+
+      - name: Renderizar e Aplicar Manifestos Auth (producao)
         env:
-          ARTIFACTS_BUCKET: ${{ env.ARTIFACTS_BUCKET }}
-          AWS_REGION: ${{ env.AWS_REGION }}
-
-      - name: Build Fat Jar
-        run: mvn clean package -DskipTests
-
-      - name: Package SAM (producao)
+          NAMESPACE: ${{ env.NAMESPACE }}
+          NODE_PORT_AUTH: ${{ env.NODE_PORT_AUTH }}
+          AUTH_IMAGE: ${{ env.AUTH_IMAGE }}
+          DB_URL: ${{ secrets.DB_URL }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          K3S_HOST: ${{ vars.K3S_SERVER_IP }}
         run: |
-          sam package \
-            --template-file template.yaml \
-            --s3-bucket "${{ env.ARTIFACTS_BUCKET }}" \
-            --output-template-file packaged.yaml
+          sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
+          mkdir -p rendered
+          envsubst < infra-k8s/k8s/namespace.yaml > rendered/namespace.yaml
+          for f in infra-k8s/k8s/auth-*.yaml; do
+            envsubst < "$f" > "rendered/$(basename "$f")"
+          done
+          ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ubuntu@"$K3S_HOST" "sudo k3s kubectl apply -f -" < rendered/namespace.yaml
+          for f in rendered/auth-*.yaml; do
+            ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              ubuntu@"$K3S_HOST" "sudo k3s kubectl apply -f -" < "$f" || exit 1
+          done
 
-      - name: Deploy SAM (producao)
+      - name: Aguardar Rollout
         run: |
-          sam deploy \
-            --template-file packaged.yaml \
-            --stack-name tc-oficina-lambda-prod \
-            --capabilities CAPABILITY_IAM \
-            --no-confirm-changeset \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              JwtSecret=${{ secrets.JWT_SECRET }} \
-              DbUrl=${{ secrets.DB_URL }} \
-              DbUser=${{ secrets.DB_USER }} \
-              DbPassword=${{ secrets.DB_PASSWORD }} \
-              VpcSubnetIds=${{ env.VPC_SUBNET_IDS }} \
-              VpcSecurityGroupId=${{ env.VPC_SECURITY_GROUP_ID }}
+          ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ubuntu@"${{ vars.K3S_SERVER_IP }}" "sudo k3s kubectl rollout status deployment/auth-deployment -n ${{ env.NAMESPACE }} --timeout=300s"
+          ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ubuntu@"${{ vars.K3S_SERVER_IP }}" "sudo k3s kubectl get pods -n ${{ env.NAMESPACE }}"
+
+      - name: Smoke Test (healthcheck auth)
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS "http://${{ vars.K3S_SERVER_IP }}:${{ env.NODE_PORT_AUTH }}/health"; then
+              echo ""
+              echo "Healthcheck OK (auth producao)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Healthcheck falhou em auth producao"
+          exit 1
