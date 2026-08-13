@@ -198,6 +198,8 @@ jobs:
           K3S_HOST: ${{ vars.K3S_SERVER_IP }}
           NAMESPACE: ${{ env.NAMESPACE }}
         run: |
+          ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ubuntu@"$K3S_HOST" "sudo k3s kubectl create namespace $NAMESPACE --dry-run=client -o yaml | sudo k3s kubectl apply -f -"
           TOKEN=$(aws ecr get-login-password --region "${{ env.AWS_REGION }}")
           SERVER=$(echo "$ECR_REPOSITORY_URL" | cut -d/ -f1)
           AUTH=$(printf 'AWS:%s' "$TOKEN" | base64 -w0)
@@ -301,6 +303,8 @@ jobs:
           K3S_HOST: ${{ vars.K3S_SERVER_IP }}
           NAMESPACE: ${{ env.NAMESPACE }}
         run: |
+          ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ubuntu@"$K3S_HOST" "sudo k3s kubectl create namespace $NAMESPACE --dry-run=client -o yaml | sudo k3s kubectl apply -f -"
           TOKEN=$(aws ecr get-login-password --region "${{ env.AWS_REGION }}")
           SERVER=$(echo "$ECR_REPOSITORY_URL" | cut -d/ -f1)
           AUTH=$(printf 'AWS:%s' "$TOKEN" | base64 -w0)
