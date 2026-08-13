@@ -10,12 +10,24 @@ A Lambda, integrada ao **API Gateway**, recebe o CPF do cliente e:
 2. **Consulta a base de dados** (RDS PostgreSQL) verificando a existência do cliente
 3. **Gera um token JWT** (HS256, mesma secret da aplicação) válido para consumo das APIs protegidas
 
-> A aplicação principal vive em [tc-oficina-app](https://github.com/rtmaraujo/tc-oficina-app), a infraestrutura do banco em [tc-oficina-infra-db](https://github.com/rtmaraujo/tc-oficina-infra-db) e o cluster em [tc-oficina-infra-k8s](https://github.com/rtmaraujo/tc-oficina-infra-k8s).
+> A aplicação principal vive em [tc-oficina-app](https://github.com/rtmaraujo/tc-oficina-app), a infraestrutura do banco em [tc-oficina-infra-db](https://github.com/rtmaraujo/tc-oficina-infra-db) e o cluster k3s em [tc-oficina-infra-k8s](https://github.com/rtmaraujo/tc-oficina-infra-k8s).
 
-## Endpoint (produção)
+## Endpoints
 
+**Produção** (stack `tc-oficina-auth`):
 ```
 POST https://8rfjx5ofoi.execute-api.us-west-2.amazonaws.com/Prod/auth
+```
+
+**Homologação** (stack `tc-oficina-auth-homolog`):
+```
+POST https://6116yqil7i.execute-api.us-west-2.amazonaws.com/Prod/auth
+```
+
+**Container (modo k3s):**
+```
+POST http://35.84.122.229:30082/auth   (produção)
+POST http://35.84.122.229:30083/auth   (homologação)
 ```
 
 **Request:**
@@ -80,7 +92,7 @@ O CI/CD em `.github/workflows/ci.yml`:
    - Branch `main` → stack `tc-oficina-auth` (produção)
 4. Smoke test: `POST /auth` via URL do API Gateway (espera 200)
 
-A Lambda roda dentro da **VPC do RDS** (subnets privadas), acessando o PostgreSQL pelo SG dedicado.
+A Lambda roda dentro da **VPC do RDS** (subnets privadas), acessando o PostgreSQL pelo SG dedicado. Nomes de recursos derivam do `AWS::StackName` para suportar os dois ambientes (`tc-oficina-auth` / `tc-oficina-auth-homolog`).
 
 ## Execução local (container)
 
