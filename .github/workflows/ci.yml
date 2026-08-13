@@ -147,14 +147,20 @@ jobs:
             --query "Stacks[0].Outputs[?OutputKey=='AuthApiEndpoint'].OutputValue" \
             --output text)
           echo "Endpoint: $URL"
-          CODE=$(curl -s -o /tmp/auth_resp.json -w "%{http_code}" -X POST "$URL" \
-            -H "Content-Type: application/json" \
-            -d '{"cpf":"12345678909"}')
-          echo "HTTP $CODE: $(cat /tmp/auth_resp.json)"
-          if [ "$CODE" != "200" ]; then
-            echo "Smoke test falhou (esperado 200 para CPF cadastrado na base)"
-            exit 1
-          fi
+          CODE=""
+          for i in $(seq 1 12); do
+            CODE=$(curl -s -o /tmp/auth_resp.json -w "%{http_code}" -X POST "$URL" \
+              -H "Content-Type: application/json" \
+              -d '{"cpf":"12345678909"}')
+            echo "tentativa $i -> HTTP $CODE: $(cat /tmp/auth_resp.json)"
+            if [ "$CODE" = "200" ]; then
+              echo "Smoke test OK"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Smoke test falhou (esperado 200 para CPF cadastrado na base)"
+          exit 1
 
   deploy-homologacao:
     if: github.event_name == 'push' && github.ref == 'refs/heads/homologacao'
