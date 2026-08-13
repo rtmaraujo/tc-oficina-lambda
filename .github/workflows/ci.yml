@@ -89,6 +89,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Configurar chave SSH do cluster k3s
         run: |
           mkdir -p ~/.ssh
@@ -101,6 +109,29 @@ jobs:
         with:
           repository: rtmaraujo/tc-oficina-infra-k8s
           path: infra-k8s
+
+      - name: Atualizar secret regcred (token ECR)
+        env:
+          ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+          K3S_HOST: ${{ vars.K3S_SERVER_IP }}
+          NAMESPACE: ${{ env.NAMESPACE }}
+        run: |
+          TOKEN=$(aws ecr get-login-password --region "${{ env.AWS_REGION }}")
+          SERVER=$(echo "$ECR_REPOSITORY_URL" | cut -d/ -f1)
+          AUTH=$(printf 'AWS:%s' "$TOKEN" | base64 -w0)
+          SECRET_YAML=$(cat <<EOF
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: regcred
+            namespace: $NAMESPACE
+          type: kubernetes.io/dockerconfigjson
+          data:
+            .dockerconfigjson: $(printf '{"auths":{"%s":{"username":"AWS","password":"%s","auth":"%s"}}}' "$SERVER" "$TOKEN" "$AUTH" | base64 -w0)
+          EOF
+          )
+          echo "$SECRET_YAML" | ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ubuntu@"$K3S_HOST" "sudo k3s kubectl apply -f -"
 
       - name: Renderizar e Aplicar Manifestos Auth (homologacao)
         env:
@@ -161,6 +192,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Configurar chave SSH do cluster k3s
         run: |
           mkdir -p ~/.ssh
@@ -173,6 +212,29 @@ jobs:
         with:
           repository: rtmaraujo/tc-oficina-infra-k8s
           path: infra-k8s
+
+      - name: Atualizar secret regcred (token ECR)
+        env:
+          ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+          K3S_HOST: ${{ vars.K3S_SERVER_IP }}
+          NAMESPACE: ${{ env.NAMESPACE }}
+        run: |
+          TOKEN=$(aws ecr get-login-password --region "${{ env.AWS_REGION }}")
+          SERVER=$(echo "$ECR_REPOSITORY_URL" | cut -d/ -f1)
+          AUTH=$(printf 'AWS:%s' "$TOKEN" | base64 -w0)
+          SECRET_YAML=$(cat <<EOF
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: regcred
+            namespace: $NAMESPACE
+          type: kubernetes.io/dockerconfigjson
+          data:
+            .dockerconfigjson: $(printf '{"auths":{"%s":{"username":"AWS","password":"%s","auth":"%s"}}}' "$SERVER" "$TOKEN" "$AUTH" | base64 -w0)
+          EOF
+          )
+          echo "$SECRET_YAML" | ssh -i ~/.ssh/k3s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ubuntu@"$K3S_HOST" "sudo k3s kubectl apply -f -"
 
       - name: Renderizar e Aplicar Manifestos Auth (producao)
         env:
