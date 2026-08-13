@@ -52,7 +52,7 @@ Resources:
   AuthFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: tc-oficina-auth
+      FunctionName: !Sub "${AWS::StackName}"
       Description: Autenticacao via CPF (valida CPF, consulta status do cliente no RDS e gera JWT)
       CodeUri: target/tc-oficina-lambda.jar
       Handler: br.com.fiap.lambda.AuthHandler::handleRequest
@@ -83,7 +83,7 @@ Resources:
   AuthApi:
     Type: AWS::Serverless::Api
     Properties:
-      Name: tc-oficina-auth-api
+      Name: !Sub "${AWS::StackName}-api"
       StageName: Prod
       Description: API Gateway para autenticacao via CPF
       EndpointConfiguration:
