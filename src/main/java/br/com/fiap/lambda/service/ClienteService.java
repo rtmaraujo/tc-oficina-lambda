@@ -18,12 +18,12 @@ public class ClienteService {
         this.dbPassword = System.getenv("DB_PASSWORD");
     }
 
-    public Optional<String> findStatusByCpf(String cpf) {
+    public Optional<String> findNomeByCpf(String cpf) {
         if (dbUrl == null) {
             throw new IllegalStateException("DB_URL nao configurado na Lambda");
         }
 
-        String sql = "SELECT status FROM clientes WHERE cpf_cnpj_value = ?";
+        String sql = "SELECT nome FROM clientes WHERE value = ?";
 
         try (Connection conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -32,7 +32,7 @@ public class ClienteService {
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    return Optional.ofNullable(rs.getString("status"));
+                    return Optional.ofNullable(rs.getString("nome"));
                 }
             }
         } catch (Exception e) {
