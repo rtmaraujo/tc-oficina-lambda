@@ -25,7 +25,7 @@ public class AuthHandler implements RequestHandler<APIGatewayProxyRequestEvent, 
 
         Optional<String> status;
         try {
-            status = clienteService.findStatusByCpf(cpf);
+            status = clienteService.findNomeByCpf(cpf);
         } catch (Exception e) {
             context.getLogger().log("Erro ao consultar cliente: " + e.getMessage());
             return error(500, "Erro interno ao consultar cliente");
@@ -39,7 +39,8 @@ public class AuthHandler implements RequestHandler<APIGatewayProxyRequestEvent, 
 
         Map<String, Object> body = new HashMap<>();
         body.put("cpf", cpf);
-        body.put("status", status.get());
+        body.put("nome", status.get());
+        body.put("status", "ATIVO");
         body.put("access_token", token);
         body.put("token_type", "Bearer");
         body.put("expires_in", 86400);

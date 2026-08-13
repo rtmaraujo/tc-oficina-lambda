@@ -1,69 +1,35 @@
 # tc-oficina-lambda
 
-Function Serverless de **autenticação por CPF** para a aplicação de oficina mecânica **tc-oficina**.
+Function Serverless de **autenticação por CPF** para a aplicação de oficina mecânica **tc-oficina**, exposta via **API Gateway**.
 
 ## Escopo
 
-A Lambda exposta via **API Gateway** recebe o CPF do cliente e:
+A Lambda, integrada ao **API Gateway**, recebe o CPF do cliente e:
 
 1. **Valida o CPF** (dígitos verificadores)
-2. **Consulta a base de dados** (RDS PostgreSQL) verificando a existência e o status do cliente
-3. **Gera um token JWT** (HS256) válido para consumo das APIs protegidas da aplicação
+2. **Consulta a base de dados** (RDS PostgreSQL) verificando a existência do cliente
+3. **Gera um token JWT** (HS256, mesma secret da aplicação) válido para consumo das APIs protegidas
 
-> A aplicação principal vive em [tc-oficina-app](../tc-oficina-app), o banco em [tc-oficina-infra-db](../tc-oficina-infra-db).
+> A aplicação principal vive em [tc-oficina-app](https://github.com/rtmaraujo/tc-oficina-app), a infraestrutura do banco em [tc-oficina-infra-db](https://github.com/rtmaraujo/tc-oficina-infra-db) e o cluster em [tc-oficina-infra-k8s](https://github.com/rtmaraujo/tc-oficina-infra-k8s).
 
-## Estrutura
+## Endpoint (produção)
 
 ```
-tc-oficina-lambda/
-├── src/main/java/br/com/fiap/lambda/
-│   ├── AuthHandler.java          # Handler da Lambda (API Gateway)
-│   ├── CpfValidator.java         # Validação de CPF
-│   └── service/
-│       ├── ClienteService.java   # Consulta ao banco (JDBC)
-│       └── JwtService.java       # Geração do JWT (jjwt, mesma secret da app)
-├── template.yaml                 # SAM: Lambda + API Gateway
-├── pom.xml                       # Java 21, Maven, shade plugin
-└── .github/workflows/ci.yml      # CI/CD (build + SAM deploy)
+POST https://8rfjx5ofoi.execute-api.us-west-2.amazonaws.com/Prod/auth
 ```
 
-## Tecnologias
-
-- Java 21
-- AWS Lambda (runtime `java21`)
-- AWS API Gateway
-- AWS SAM CLI
-- PostgreSQL (JDBC)
-- jjwt 0.12.6 (mesma versão da aplicação principal)
-
-## Pré-requisitos
-
-- JAR gerado com `mvn clean package`
-- Secrets no GitHub: `JWT_SECRET` (mesma da aplicação), `DB_URL`, `DB_USER`, `DB_PASSWORD`
-- Vars no GitHub: `AWS_REGION`
-
-## Como executar localmente
-
+**Request:**
 ```bash
-mvn clean package
-
-# Invocar com evento de exemplo (requer env vars configuradas)
-sam local start-api \
-  --parameter-overrides JwtSecret=... DbUrl=... DbUser=... DbPassword=...
-```
-
-## Teste com curl (após deploy)
-
-```bash
-curl -X POST https://<api-id>.execute-api.<region>.amazonaws.com/Prod/auth \
+curl -X POST https://8rfjx5ofoi.execute-api.us-west-2.amazonaws.com/Prod/auth \
   -H "Content-Type: application/json" \
-  -d '{"cpf":"17861341011"}'
+  -d '{"cpf":"12345678909"}'
 ```
 
 **Response:**
 ```json
 {
-  "cpf": "17861341011",
+  "cpf": "12345678909",
+  "nome": "Cliente Teste Lambda",
   "status": "ATIVO",
   "access_token": "eyJhbGciOiJIUzI1NiJ9...",
   "token_type": "Bearer",
@@ -71,24 +37,70 @@ curl -X POST https://<api-id>.execute-api.<region>.amazonaws.com/Prod/auth \
 }
 ```
 
-## CI/CD
+## Estrutura
 
-O workflow em `.github/workflows/ci.yml`:
+```
+tc-oficina-lambda/
+├── src/main/java/br/com/fiap/lambda/
+│   ├── AuthHandler.java          # Handler da Lambda (API Gateway Proxy)
+│   ├── CpfValidator.java         # Validação de CPF
+│   ├── Main.java                 # Modo container (execução local / k3s)
+│   └── service/
+│       ├── ClienteService.java   # Consulta ao banco (JDBC)
+│       └── JwtService.java       # Geração do JWT (jjwt, mesma secret da app)
+├── template.yaml                 # AWS SAM: Lambda + API Gateway + VPC
+├── Dockerfile                    # Build da imagem container (modo local/k3s)
+├── pom.xml                       # Java 21, Maven, shade plugin
+└── .github/workflows/ci.yml      # CI/CD (build + deploy SAM + smoke test)
+```
 
-1. `mvn clean verify` (build + testes) em qualquer push/PR para `main`
-2. Deploy via **SAM** automático na branch `homologacao`
-3. Deploy via **SAM** automático na branch `main` (produção)
+## Tecnologias
+
+- Java 21
+- AWS Lambda (runtime `java21`)
+- AWS API Gateway
+- AWS SAM / CloudFormation
+- PostgreSQL (JDBC, dentro da VPC do RDS)
+- jjwt 0.12.6 (mesma versão da aplicação principal)
+
+## Requisitos / Prerequisitos
+
+- JAR gerado com `mvn clean package` (shade)
+- Secrets no GitHub: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `DB_URL`, `DB_USER`, `DB_PASSWORD`, `JWT_SECRET`
+- Vars no GitHub: `AWS_REGION`, `VPC_ID`, `SUBNET_A`, `SUBNET_B`, `LAMBDA_ROLE_ARN`
+
+## Deploy
+
+O CI/CD em `.github/workflows/ci.yml`:
+
+1. `mvn clean verify` (build + testes) em push/PR
+2. `docker-build`: build e push da imagem container para o ECR (modo local/k3s)
+3. `deploy-lambda`: empacota o jar via SAM e faz deploy com `aws cloudformation deploy`:
+   - Branch `homologacao` → stack `tc-oficina-auth-homolog`
+   - Branch `main` → stack `tc-oficina-auth` (produção)
+4. Smoke test: `POST /auth` via URL do API Gateway (espera 200)
+
+A Lambda roda dentro da **VPC do RDS** (subnets privadas), acessando o PostgreSQL pelo SG dedicado.
+
+## Execução local (container)
+
+```bash
+mvn clean package
+JWT_SECRET=... DB_URL=jdbc:postgresql://... DB_USER=... DB_PASSWORD=... \
+  java -cp target/tc-oficina-lambda.jar br.com.fiap.lambda.Main
+# POST http://localhost:8080/auth  |  GET http://localhost:8080/health
+```
 
 ## Diagrama da Arquitetura
 
 ```mermaid
 flowchart LR
   CLIENTE[Cliente] -->|POST /auth {cpf}| GW[API Gateway]
-  GW -->|evento| LAMBDA[Auth Lambda]
-  LAMBDA -->|consulta status| DB[(RDS PostgreSQL)]
-  LAMBDA -->|gera JWT| GW
+  GW -->|invoca| LAMBDA[Auth Lambda - Java 21]
+  LAMBDA -->|JDBC consulta| DB[(RDS PostgreSQL)]
+  LAMBDA -->|gera JWT HS256| GW
   GW -->|200 token| CLIENTE
-  CLIENTE -->|Bearer JWT| APP[API tc-oficina-app]
+  CLIENTE -->|Bearer JWT| APP[API tc-oficina-app no k3s]
 
   style LAMBDA fill:#fff3e0,stroke:#e65100
 ```

@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: TC Oficina - Function Serverless de autenticacao via CPF com API Gateway
+
+Parameters:
+  DbUrl:
+    Type: String
+    Description: JDBC URL do PostgreSQL gerenciado (RDS)
+  DbUser:
+    Type: String
+    Description: Usuario do banco
+  DbPassword:
+    Type: String
+    Description: Senha do banco
+    NoEcho: true
+  JwtSecret:
+    Type: String
+    Description: Mesma secret JWT usada pela aplicacao principal
+    NoEcho: true
+  VpcId:
+    Type: String
+    Description: VPC do RDS (vpc-014a010e1706b1534)
+  SubnetA:
+    Type: String
+    Description: Subnet privada us-west-2a do RDS
+  SubnetB:
+    Type: String
+    Description: Subnet privada us-west-2b do RDS
+  LambdaRoleArn:
+    Type: String
+    Description: ARN da role de execucao da Lambda (LabRole do Learner Lab)
+
+Resources:
+  AuthSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG da Lambda de autenticacao (egress so para o RDS)
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: tc-oficina-auth-lambda-sg
+
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: tc-oficina-auth
+      Description: Autenticacao via CPF (valida CPF, consulta status do cliente no RDS e gera JWT)
+      CodeUri: target/tc-oficina-lambda.jar
+      Handler: br.com.fiap.lambda.AuthHandler::handleRequest
+      Runtime: java21
+      Timeout: 30
+      MemorySize: 512
+      Role: !Ref LambdaRoleArn
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref AuthSecurityGroup
+        SubnetIds:
+          - !Ref SubnetA
+          - !Ref SubnetB
+      Environment:
+        Variables:
+          DB_URL: !Ref DbUrl
+          DB_USER: !Ref DbUser
+          DB_PASSWORD: !Ref DbPassword
+          JWT_SECRET: !Ref JwtSecret
+      Events:
+        AuthApi:
+          Type: Api
+          Properties:
+            Path: /auth
+            Method: POST
+            RestApiId: !Ref AuthApi
+
+  AuthApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: tc-oficina-auth-api
+      StageName: Prod
+      Description: API Gateway para autenticacao via CPF
+      EndpointConfiguration:
+        Type: REGIONAL
+      Cors:
+        AllowMethods: "'POST,OPTIONS'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
+
+Outputs:
+  AuthApiEndpoint:
+    Description: URL do endpoint de autenticacao via CPF
+    Value: !Sub "https://${AuthApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/auth"
+  AuthFunctionArn:
+    Description: ARN da Lambda de autenticacao
+    Value: !GetAtt AuthFunction.Arn

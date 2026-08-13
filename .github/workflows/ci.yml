@@ -1,4 +1,4 @@
-name: CI/CD - Auth (container no k3s)
+name: CI/CD - Lambda + API Gateway (auth via CPF)
 
 on:
   push:
@@ -73,6 +73,88 @@ jobs:
             --build-arg COMMIT_SHA="${GITHUB_SHA}" \
             -t "${ECR_REPOSITORY_URL}:${IMAGE_TAG}" .
           docker push "${ECR_REPOSITORY_URL}:${IMAGE_TAG}"
+
+  deploy-lambda:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/homologacao')
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      - name: Build maven (jar shaded)
+        run: mvn clean package -DskipTests
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Empacotar SAM (jar -> S3)
+        env:
+          STACK_NAME: tc-oficina-auth
+        run: |
+          STACK_SUFFIX=""
+          if [ "${{ github.ref }}" = "refs/heads/homologacao" ]; then STACK_SUFFIX="-homolog"; fi
+          echo "STACK_FULL=${STACK_NAME}${STACK_SUFFIX}" >> "$GITHUB_ENV"
+          aws cloudformation package \
+            --template-file template.yaml \
+            --s3-bucket tc-oficina-sam-artifacts \
+            --output-template-file packaged.yaml \
+            --region "${{ env.AWS_REGION }}"
+
+      - name: Deploy Lambda + API Gateway (SAM/CloudFormation)
+        env:
+          STACK_NAME: tc-oficina-auth
+          VPC_ID: ${{ vars.VPC_ID }}
+          SUBNET_A: ${{ vars.SUBNET_A }}
+          SUBNET_B: ${{ vars.SUBNET_B }}
+          LAMBDA_ROLE_ARN: ${{ vars.LAMBDA_ROLE_ARN }}
+        run: |
+          STACK_SUFFIX=""
+          if [ "${{ github.ref }}" = "refs/heads/homologacao" ]; then STACK_SUFFIX="-homolog"; fi
+          aws cloudformation deploy \
+            --template-file packaged.yaml \
+            --stack-name "${STACK_NAME}${STACK_SUFFIX}" \
+            --region "${{ env.AWS_REGION }}" \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides \
+              DbUrl="${{ secrets.DB_URL }}" \
+              DbUser="${{ secrets.DB_USER }}" \
+              DbPassword="${{ secrets.DB_PASSWORD }}" \
+              JwtSecret="${{ secrets.JWT_SECRET }}" \
+              VpcId="${{ vars.VPC_ID }}" \
+              SubnetA="${{ vars.SUBNET_A }}" \
+              SubnetB="${{ vars.SUBNET_B }}" \
+              LambdaRoleArn="${{ vars.LAMBDA_ROLE_ARN }}"
+
+      - name: Smoke Test (POST /auth via API Gateway)
+        run: |
+          URL=$(aws cloudformation describe-stacks \
+            --stack-name "${{ env.STACK_FULL }}" \
+            --region "${{ env.AWS_REGION }}" \
+            --query "Stacks[0].Outputs[?OutputKey=='AuthApiEndpoint'].OutputValue" \
+            --output text)
+          echo "Endpoint: $URL"
+          CODE=$(curl -s -o /tmp/auth_resp.json -w "%{http_code}" -X POST "$URL" \
+            -H "Content-Type: application/json" \
+            -d '{"cpf":"12345678909"}')
+          echo "HTTP $CODE: $(cat /tmp/auth_resp.json)"
+          if [ "$CODE" != "200" ]; then
+            echo "Smoke test falhou (esperado 200 para CPF cadastrado na base)"
+            exit 1
+          fi
 
   deploy-homologacao:
     if: github.event_name == 'push' && github.ref == 'refs/heads/homologacao'
