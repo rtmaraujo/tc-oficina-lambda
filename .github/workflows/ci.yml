@@ -232,6 +232,8 @@ jobs:
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          NEW_RELIC_APP_NAME_AUTH: tc-oficina-auth-homolog
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
           K3S_HOST: ${{ vars.K3S_SERVER_IP }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
@@ -337,6 +339,8 @@ jobs:
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          NEW_RELIC_APP_NAME_AUTH: tc-oficina-auth
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
           K3S_HOST: ${{ vars.K3S_SERVER_IP }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
