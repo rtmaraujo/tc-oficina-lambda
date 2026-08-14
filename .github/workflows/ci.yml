@@ -170,7 +170,8 @@ jobs:
 
     env:
       NAMESPACE: tc-oficina-homolog
-      NODE_PORT_AUTH: "30083"
+      ENTRYPOINT: web-homolog
+      GATEWAY_PORT: "8081"
       AUTH_IMAGE: ${{ vars.ECR_REPOSITORY_URL }}:auth-${{ github.sha }}
 
     steps:
@@ -226,7 +227,7 @@ jobs:
       - name: Renderizar e Aplicar Manifestos Auth (homologacao)
         env:
           NAMESPACE: ${{ env.NAMESPACE }}
-          NODE_PORT_AUTH: ${{ env.NODE_PORT_AUTH }}
+          ENTRYPOINT: ${{ env.ENTRYPOINT }}
           AUTH_IMAGE: ${{ env.AUTH_IMAGE }}
           DB_URL: ${{ secrets.DB_URL }}
           DB_USER: ${{ secrets.DB_USER }}
@@ -259,9 +260,9 @@ jobs:
       - name: Smoke Test (healthcheck auth)
         run: |
           for i in $(seq 1 30); do
-            if curl -fsS "http://${{ vars.K3S_SERVER_IP }}:${{ env.NODE_PORT_AUTH }}/health"; then
+            if curl -fsS "http://${{ vars.K3S_SERVER_IP }}:${{ env.GATEWAY_PORT }}/health"; then
               echo ""
-              echo "Healthcheck OK (auth homologacao)"
+              echo "Healthcheck OK (auth homologacao via API Gateway)"
               exit 0
             fi
             sleep 5
@@ -277,7 +278,8 @@ jobs:
 
     env:
       NAMESPACE: tc-oficina
-      NODE_PORT_AUTH: "30082"
+      ENTRYPOINT: web
+      GATEWAY_PORT: "80"
       AUTH_IMAGE: ${{ vars.ECR_REPOSITORY_URL }}:auth-${{ github.sha }}
 
     steps:
@@ -333,7 +335,7 @@ jobs:
       - name: Renderizar e Aplicar Manifestos Auth (producao)
         env:
           NAMESPACE: ${{ env.NAMESPACE }}
-          NODE_PORT_AUTH: ${{ env.NODE_PORT_AUTH }}
+          ENTRYPOINT: ${{ env.ENTRYPOINT }}
           AUTH_IMAGE: ${{ env.AUTH_IMAGE }}
           DB_URL: ${{ secrets.DB_URL }}
           DB_USER: ${{ secrets.DB_USER }}
@@ -366,9 +368,9 @@ jobs:
       - name: Smoke Test (healthcheck auth)
         run: |
           for i in $(seq 1 30); do
-            if curl -fsS "http://${{ vars.K3S_SERVER_IP }}:${{ env.NODE_PORT_AUTH }}/health"; then
+            if curl -fsS "http://${{ vars.K3S_SERVER_IP }}:${{ env.GATEWAY_PORT }}/health"; then
               echo ""
-              echo "Healthcheck OK (auth producao)"
+              echo "Healthcheck OK (auth producao via API Gateway)"
               exit 0
             fi
             sleep 5
