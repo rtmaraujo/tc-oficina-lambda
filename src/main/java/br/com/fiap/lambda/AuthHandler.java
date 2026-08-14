@@ -6,6 +6,8 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -13,8 +15,19 @@ import java.util.Optional;
 
 public class AuthHandler implements RequestHandler<APIGatewayProxyRequestEvent, APIGatewayProxyResponseEvent> {
 
-    private final ClienteService clienteService = new ClienteService();
-    private final JwtService jwtService = new JwtService(System.getenv("JWT_SECRET"));
+    private static final Logger log = LoggerFactory.getLogger(AuthHandler.class);
+
+    private final ClienteService clienteService;
+    private final JwtService jwtService;
+
+    public AuthHandler() {
+        this(new ClienteService(), new JwtService(System.getenv("JWT_SECRET")));
+    }
+
+    AuthHandler(ClienteService clienteService, JwtService jwtService) {
+        this.clienteService = clienteService;
+        this.jwtService = jwtService;
+    }
 
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent input, Context context) {
@@ -27,7 +40,7 @@ public class AuthHandler implements RequestHandler<APIGatewayProxyRequestEvent, 
         try {
             status = clienteService.findNomeByCpf(cpf);
         } catch (Exception e) {
-            context.getLogger().log("Erro ao consultar cliente: " + e.getMessage());
+            log.error("Erro ao consultar cliente", e);
             return error(500, "Erro interno ao consultar cliente");
         }
 
