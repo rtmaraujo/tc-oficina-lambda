@@ -8,6 +8,8 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -15,6 +17,8 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 
 public class Main {
+
+    private static final Logger log = LoggerFactory.getLogger(Main.class);
 
     private static AuthHandler newAuthHandler() {
         final String secret = System.getenv("JWT_SECRET");
@@ -32,7 +36,7 @@ public class Main {
         server.createContext("/auth", Main::auth);
         server.start();
 
-        System.out.println("TC Oficina Auth service listening on port " + port);
+        log.info("TC Oficina Auth service listening on port {}", port);
     }
 
     private static void health(HttpExchange exchange) throws IOException {
@@ -55,7 +59,7 @@ public class Main {
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             respond(exchange, response.getStatusCode(), response.getBody());
         } catch (Throwable t) {
-            t.printStackTrace(System.out);
+            log.error("Falha interna no servico de auth", t);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             respond(exchange, 500, "{\"erro\":\"Falha interna no servico de auth\"}");
         }
