@@ -24,11 +24,14 @@ POST https://8rfjx5ofoi.execute-api.us-west-2.amazonaws.com/Prod/auth
 POST https://6116yqil7i.execute-api.us-west-2.amazonaws.com/Prod/auth
 ```
 
-**Container (modo k3s):**
+**Container (modo k3s) — entrada canônica via API Gateway Traefik:**
 ```
-POST http://35.84.122.229:30082/auth   (produção)
-POST http://35.84.122.229:30083/auth   (homologação)
+POST http://35.84.122.229/auth    (produção)
+POST http://35.84.122.229:8081/auth (homologação)
 ```
+
+> O container auth no k3s é exposto **apenas** pelo API Gateway Traefik (`/auth` e `/health`),
+> ponto único de entrada de todas as requisições da aplicação.
 
 **Request:**
 ```bash
@@ -90,7 +93,11 @@ O CI/CD em `.github/workflows/ci.yml`:
 3. `deploy-lambda`: empacota o jar via SAM e faz deploy com `aws cloudformation deploy`:
    - Branch `homologacao` → stack `tc-oficina-auth-homolog`
    - Branch `main` → stack `tc-oficina-auth` (produção)
-4. Smoke test: `POST /auth` via URL do API Gateway (espera 200)
+4. `deploy-homologacao` / `deploy-producao`: renderiza e aplica manifestos `auth-*` do
+   `tc-oficina-infra-k8s` no k3s (deployment, service ClusterIP, ingressroute do API Gateway Traefik):
+   - Branch `homologacao` → namespace `tc-oficina-homolog` (entrypoint `web-homolog`)
+   - Branch `main` → namespace `tc-oficina` (entrypoint `web`)
+5. Smoke tests: `POST /auth` via API Gateway AWS (espera 200) e `GET /health` via API Gateway Traefik
 
 A Lambda roda dentro da **VPC do RDS** (subnets privadas), acessando o PostgreSQL pelo SG dedicado. Nomes de recursos derivam do `AWS::StackName` para suportar os dois ambientes (`tc-oficina-auth` / `tc-oficina-auth-homolog`).
 
